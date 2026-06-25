@@ -1,12 +1,15 @@
+import asyncio
 import os
 import traceback
+from typing import List
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
 from .extraction import (
-    extract_data_from_pdf,
+    build_labels,
+    extract_document,
     InsufficientQuotaError,
     OpenAIRateLimitError,
     OpenAITimeoutError,
@@ -54,32 +57,54 @@ async def health_check():
 
 
 MAX_FILE_SIZE = 30 * 1024 * 1024  # 30MB
-MAX_LABELS = 100
+MAX_LABELS = 300  # raširivanje pozicija preko sastavnica može dati puno naljepnica
+MAX_FILES = 10
 
 
 @app.post("/extract", response_model=NarudzbaData)
-async def extract_from_pdf(file: UploadFile = File(...)):
+async def extract_from_pdf(files: List[UploadFile] = File(...)):
     """
-    Extract order data from a PDF file.
+    Extract order data from one or more PDF files.
 
-    Sends the PDF directly to OpenAI API (native PDF input) to extract
-    structured data about items in the order.
+    - One PDF: treated as a self-contained order (all positions become labels).
+    - Multiple PDFs: an order document plus one or more bill-of-materials (sastavnica)
+      documents. Order positions are matched to assemblies by part number and expanded
+      into one label per assembly part (quantities multiplied).
+
+    Each PDF is sent directly to OpenAI (native PDF input) for extraction.
     """
-    if not file.filename.lower().endswith('.pdf'):
-        raise HTTPException(status_code=400, detail="Samo PDF datoteke su podržane")
+    if not files:
+        raise HTTPException(status_code=400, detail="Nije priložena nijedna datoteka")
+
+    if len(files) > MAX_FILES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Previše datoteka ({len(files)}). Maksimum je {MAX_FILES}."
+        )
 
     try:
-        # Read PDF content
-        pdf_bytes = await file.read()
+        pdf_bytes_list: list[bytes] = []
+        for file in files:
+            if not file.filename or not file.filename.lower().endswith('.pdf'):
+                raise HTTPException(status_code=400, detail="Samo PDF datoteke su podržane")
 
-        if len(pdf_bytes) > MAX_FILE_SIZE:
-            raise HTTPException(
-                status_code=413,
-                detail=f"Datoteka je prevelika ({len(pdf_bytes) // (1024*1024)}MB). Maksimum je 30MB."
-            )
+            pdf_bytes = await file.read()
 
-        # Extract data using OpenAI native PDF input
-        data = extract_data_from_pdf(pdf_bytes)
+            if len(pdf_bytes) > MAX_FILE_SIZE:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Datoteka '{file.filename}' je prevelika "
+                           f"({len(pdf_bytes) // (1024*1024)}MB). Maksimum je 30MB."
+                )
+            pdf_bytes_list.append(pdf_bytes)
+
+        # Extract each PDF concurrently (OpenAI calls run in threads)
+        documents = await asyncio.gather(
+            *(asyncio.to_thread(extract_document, b) for b in pdf_bytes_list)
+        )
+
+        # Link order positions with assemblies and build the label list
+        data = build_labels(list(documents))
 
         return data
 

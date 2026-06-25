@@ -20,12 +20,12 @@ function App() {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [outputFormat, setOutputFormat] = useState<OutputFormat>('pdf');
 
-  const handleFileSelect = async (file: File) => {
+  const handleFilesSelect = async (files: File[]) => {
     setIsLoading(true);
     setError(null);
 
     try {
-      const data: NarudzbaData = await extractFromPdf(file);
+      const data: NarudzbaData = await extractFromPdf(files);
       
       // Convert extracted data to labels
       const newLabels: LabelData[] = data.artikli.map(artikl => ({
@@ -148,12 +148,13 @@ function App() {
         {step === 'upload' && (
           <div className="max-w-xl mx-auto">
             <div className="text-center mb-8">
-              <h2 className="text-2xl font-bold text-zinc-900 mb-2">Učitajte narudžbenicu</h2>
+              <h2 className="text-2xl font-bold text-zinc-900 mb-2">Učitajte dokumente</h2>
               <p className="text-zinc-600">
-                Učitajte PDF narudžbenicu i automatski ćemo ekstrahirati podatke za naljepnice
+                Učitajte PDF narudžbenicu — i po potrebi pripadajuće sastavnice — a mi ćemo
+                automatski povezati pozicije i pripremiti naljepnice
               </p>
             </div>
-            <FileUpload onFileSelect={handleFileSelect} isLoading={isLoading} />
+            <FileUpload onFilesSelect={handleFilesSelect} isLoading={isLoading} />
             
             {isLoading && (
               <div className="mt-6 flex flex-col items-center gap-2 text-zinc-600">

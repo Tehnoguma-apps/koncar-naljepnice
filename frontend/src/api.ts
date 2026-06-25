@@ -26,9 +26,9 @@ function handleFetchError(err: unknown, operation: string): never {
   throw err;
 }
 
-export async function extractFromPdf(file: File): Promise<NarudzbaData> {
+export async function extractFromPdf(files: File[]): Promise<NarudzbaData> {
   const formData = new FormData();
-  formData.append('file', file);
+  files.forEach((file) => formData.append('files', file));
 
   let response: Response;
   try {
